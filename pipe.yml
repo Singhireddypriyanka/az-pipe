@@ -1,0 +1,75 @@
+trigger:
+  branches:
+    include:
+      - dev
+
+parameters:
+  - name: environment
+    displayName: Select Environment
+    type: string
+    default: dev
+    values:
+      - dev
+      - int
+      - prod
+
+variables:
+  - group: AWS_Credentials
+
+  - name: awsRegion
+    value: us-west-2
+
+  - name: awsAccountId
+    value: ${{ if eq(parameters.environment, 'dev') }}:
+             '123456789012'
+           ${{ if eq(parameters.environment, 'int') }}:
+             '987654321000'
+           ${{ if eq(parameters.environment, 'prod') }}:
+             '000111222333'
+
+  - name: awsCredentials
+    value: ${{ if eq(parameters.environment, 'dev') }}:
+             'buildAgent-ITEmployeeExperience-ppeAUDEv'
+           ${{ if eq(parameters.environment, 'int') }}:
+             'buildAgent-ITEmployeeExperience-ppeAUDEInt'
+           ${{ if eq(parameters.environment, 'prod') }}:
+             'buildAgent-ITEmployeeExperience-ppeAUDEProd'
+
+stages:
+  - stage: BuildAMI
+    displayName: Build Windows 11 AMI in AWS
+    condition: eq(parameters.environment, 'dev')  # Dev-only
+    jobs:
+      - job: RunPacker
+        displayName: Run Packer for Dev
+        pool:
+          vmImage: 'ubuntu-latest'
+
+        steps:
+          - checkout: self
+
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '3.11'
+
+          - script: |
+              echo "Installing AWS CLI and Packer..."
+              sudo apt-get update
+              sudo apt-get install unzip -y
+              curl -O https://releases.hashicorp.com/packer/1.9.4/packer_1.9.4_linux_amd64.zip
+              unzip packer_1.9.4_linux_amd64.zip
+              sudo mv packer /usr/local/bin/
+              packer version
+              pip install awscli
+            displayName: 'Install Packer and AWS CLI'
+
+          - task: AWSShellScript@1
+            displayName: 'Run Packer Build'
+            inputs:
+              awsCredentials: $(awsCredentials)
+              regionName: $(awsRegion)
+              scriptType: 'bash'
+              script: |
+                cd packer
+                packer init win11.pkr.hcl
+                packer build -var-file=variables.pkr.hcl win11.pkr.hcl
